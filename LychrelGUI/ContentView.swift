@@ -121,6 +121,7 @@ struct ContentView: View {
     @AppStorage("csvPath") private var csvPath = defaultCSVPath()
     @AppStorage("useThousandsSeparators") private var useCommas = false
     @AppStorage("algorithm") private var algorithmRaw = Algorithm.packedBCD.rawValue
+    @AppStorage("showVisualiser") private var showVisualiser = false
 
     @State private var model = RunModel()
 
@@ -163,6 +164,20 @@ struct ContentView: View {
     }
 
     var body: some View {
+        HStack(spacing: 0) {
+            controls
+            if showVisualiser {
+                Divider()
+                SpiralPane(image: model.spiral, error: model.spiralError, isRunning: model.isRunning)
+                    // Give the pane the spare width so the controls stay at their minimum.
+                    .layoutPriority(1)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.default, value: showVisualiser)
+    }
+
+    private var controls: some View {
         VStack(alignment: .leading, spacing: 16) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
@@ -246,6 +261,13 @@ struct ContentView: View {
                 Button("Cancel") { model.cancel() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(!model.isRunning || model.isCancelling)
+
+                Spacer()
+
+                Toggle(isOn: $showVisualiser) {
+                    Label("Visualiser", systemImage: "sidebar.right")
+                }
+                .toggleStyle(.button)
             }
 
             if let summary = model.summary {

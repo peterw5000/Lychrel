@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import Foundation
 import LychrelKit
 import Observation
@@ -30,6 +32,11 @@ final class RunModel {
     private(set) var exceeded = 0
     private(set) var summary: RunSummary?
 
+    // Spiral visualisation of the last completed run. Rendered once the run
+    // finishes; a live mode would re-render from partial results instead.
+    private(set) var spiral: CGImage?
+    private(set) var spiralError: String?
+
     private var cancellation: CancellationFlag?
     private var runID = 0
 
@@ -44,10 +51,15 @@ final class RunModel {
         currentNumber = 0
         exceeded = 0
         summary = nil
+        spiral = nil
+        spiralError = nil
         isRunning = true
         isCancelling = false
 
         let clock = ContinuousClock()
+        // Render the spiral in the display's colour space so showing it
+        // doesn't require a full-bitmap conversion on the main thread.
+        let displayColorSpace = NSScreen.main?.colorSpace?.cgColorSpace
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // Snapshot the weak reference into a constant so the nested Tasks
@@ -80,6 +92,18 @@ final class RunModel {
                 }
             }
 
+            // A cancelled run leaves unchecked placeholders, which would draw
+            // as non-Lychrel, so only visualise complete runs.
+            var spiral: CGImage?
+            var spiralError: String?
+            if !outcome.wasCancelled {
+                do {
+                    spiral = try SpiralRenderer.render(lychrel: results.map(\.exceededMaxIter), colorSpace: displayColorSpace)
+                } catch {
+                    spiralError = error.localizedDescription
+                }
+            }
+
             let summary = RunSummary(
                 lowerBound: lowerBound,
                 upperBound: upperBound,
@@ -97,8 +121,10 @@ final class RunModel {
                 csvError: csvError
             )
 
-            Task { @MainActor in
-                model?.finish(summary, id: id)
+            // Capture the final values by copy so the main-actor Task doesn't
+            // reference the mutable locals.
+            Task { @MainActor [spiral, spiralError] in
+                model?.finish(summary, spiral: spiral, spiralError: spiralError, id: id)
             }
         }
     }
@@ -117,9 +143,11 @@ final class RunModel {
         exceeded = progress.exceeded
     }
 
-    private func finish(_ summary: RunSummary, id: Int) {
+    private func finish(_ summary: RunSummary, spiral: CGImage?, spiralError: String?, id: Int) {
         guard id == runID else { return }
         self.summary = summary
+        self.spiral = spiral
+        self.spiralError = spiralError
         isRunning = false
         isCancelling = false
     }
